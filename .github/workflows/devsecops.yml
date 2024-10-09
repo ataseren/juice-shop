@@ -33,6 +33,8 @@ jobs:
           project: 'juice-shop'
           path: '.'
           format: 'HTML'
+          args: >
+            --disableArchive
       - name: Upload Test results
         uses: actions/upload-artifact@master
         with:
