@@ -7,8 +7,8 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 jobs:
-  pipeline:
-    name: SonarCloud
+  Analysis:
+    name: DevSecOps Pipeline
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +28,9 @@ jobs:
             -Dsonar.organization=ataseren
       - name: Dependency Review
         uses: actions/dependency-review-action@v4.3.4
+        with:
+          base-ref: ${{ github.event.pull_request.base.sha || 'main' }}
+          head-ref: ${{ github.event.pull_request.head.sha || github.ref }}
       - name: GitGuardian scan
         uses: GitGuardian/ggshield-action@v1
         env:
