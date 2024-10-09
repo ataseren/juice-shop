@@ -7,7 +7,7 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 jobs:
-  sonarcloud:
+  pipeline:
     name: SonarCloud
     runs-on: ubuntu-latest
     steps:
@@ -26,3 +26,14 @@ jobs:
             # mandatory
             -Dsonar.projectKey=ataseren_juice-shop
             -Dsonar.organization=ataseren
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4.3.4
+      - name: GitGuardian scan
+        uses: GitGuardian/ggshield-action@v1
+        env:
+          GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+
+            
