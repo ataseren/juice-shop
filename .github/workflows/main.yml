@@ -40,15 +40,15 @@ jobs:
           category: semgrep
 
       # ---------------------------
-      # Secret scanning (Gitleaks) -> SARIF -> GitHub Security Dashboard
-      # gitleaks-action outputs results.sarif by default
+      # Secret scanning (Gitleaks) -> SARIF -> GitHub Security Dashboard (diff/commit-based)
+      # NOTE: outputs results.sarif by default
       # ---------------------------
-      - name: Gitleaks Secret Scan (SARIF)
+      - name: Gitleaks Secret Scan (CI diff scan)
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Gitleaks SARIF to GitHub Security
+      - name: Upload Gitleaks SARIF (CI diff scan) to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
@@ -78,12 +78,8 @@ jobs:
           path: sbom.cdx.json
 
       # ---------------------------
-      # Container vuln scan (Grype via anchore/scan-action) -> SARIF -> GitHub Security Dashboard
-      #
-      # Fixes:
-      # - remove unsupported output-file
-      # - prevent failing the job on high vulns (fail-build: false)
-      # - upload the default SARIF file name: results.sarif
+      # Container vuln scan (Grype) -> SARIF -> GitHub Security Dashboard
+      # NOTE: anchore/scan-action writes results.sarif by default
       # ---------------------------
       - name: Scan image with Grype (SARIF)
         uses: anchore/scan-action@v3
@@ -100,10 +96,32 @@ jobs:
           sarif_file: results.sarif
           category: grype
 
-      # Optional: keep the last SARIF around as an artifact (useful for debugging)
-      - name: Upload latest SARIF artifact (debug)
-        if: always()
-        uses: actions/upload-artifact@v4
+  gitleaks_full:
+    name: gitleaks-full-repo-scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
         with:
-          name: latest-results-sarif
-          path: results.sarif
+          fetch-depth: 0
+
+      - name: Gitleaks Full History Scan (SARIF)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: >
+            detect
+            --source .
+            --log-opts="--all"
+            --report-format sarif
+            --report-path gitleaks-full.sarif
+
+      - name: Upload Gitleaks Full Scan SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: gitleaks-full.sarif
+          category: gitleaks-full
