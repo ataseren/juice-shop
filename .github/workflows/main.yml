@@ -25,10 +25,6 @@ jobs:
 
       # ---------------------------
       # SAST (Semgrep) -> SARIF -> GitHub Security Dashboard
-      # Fix:
-      # - DO NOT set entryPoint (it becomes docker --entrypoint "scan" and fails)
-      # - Run semgrep explicitly via args: semgrep scan ...
-      # - No SEMGREP_APP_TOKEN needed for GitHub SARIF upload
       # ---------------------------
       - name: Semgrep scan (SARIF)
         uses: returntocorp/semgrep-action@v1
@@ -45,9 +41,7 @@ jobs:
 
       # ---------------------------
       # Secret scanning (Gitleaks) -> SARIF -> GitHub Security Dashboard
-      # Fix:
-      # - gitleaks-action@v2 ignores/complains about "args"
-      # - it outputs results.sarif by default
+      # gitleaks-action outputs results.sarif by default
       # ---------------------------
       - name: Gitleaks Secret Scan (SARIF)
         uses: gitleaks/gitleaks-action@v2
@@ -84,7 +78,12 @@ jobs:
           path: sbom.cdx.json
 
       # ---------------------------
-      # Container vuln scan (Grype) -> SARIF -> GitHub Security Dashboard
+      # Container vuln scan (Grype via anchore/scan-action) -> SARIF -> GitHub Security Dashboard
+      #
+      # Fixes:
+      # - remove unsupported output-file
+      # - prevent failing the job on high vulns (fail-build: false)
+      # - upload the default SARIF file name: results.sarif
       # ---------------------------
       - name: Scan image with Grype (SARIF)
         uses: anchore/scan-action@v3
@@ -92,12 +91,19 @@ jobs:
           image: juice-shop:${{ github.sha }}
           fail-build: "false"
           output-format: sarif
-          output-file: grype.sarif
           severity-cutoff: high
 
       - name: Upload Grype SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: grype.sarif
+          sarif_file: results.sarif
           category: grype
+
+      # Optional: keep the last SARIF around as an artifact (useful for debugging)
+      - name: Upload latest SARIF artifact (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-results-sarif
+          path: results.sarif
