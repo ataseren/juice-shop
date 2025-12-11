@@ -6,14 +6,16 @@ on:
     branches: [ master ]
   pull_request:
     types: [opened, synchronize, reopened]
+  schedule:
+    - cron: "0 2 * * 0" # weekly full scan (Sun 02:00 UTC)
 
 permissions:
   contents: read
   security-events: write
 
 jobs:
-  tip:
-    name: trendyol-interview-pipeline
+  main:
+    name: ci-security-scans
     runs-on: ubuntu-latest
     if: (github.actor != 'dependabot[bot]')
 
@@ -40,20 +42,31 @@ jobs:
           category: semgrep
 
       # ---------------------------
-      # Secret scanning (Gitleaks) -> SARIF -> GitHub Security Dashboard (diff/commit-based)
-      # NOTE: outputs results.sarif by default
+      # Secret scanning (Gitleaks) - CI mode
+      # Option A: working tree only (NO git history) -> avoids legacy secret noise
       # ---------------------------
-      - name: Gitleaks Secret Scan (CI diff scan)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Gitleaks
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
+          | tar -xz
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
 
-      - name: Upload Gitleaks SARIF (CI diff scan) to GitHub Security
+      - name: Gitleaks CI scan (working tree only) (SARIF)
+        run: |
+          gitleaks detect \
+            --source . \
+            --no-git \
+            --report-format sarif \
+            --report-path gitleaks-ci.sarif \
+            --exit-code 0
+
+      - name: Upload Gitleaks CI SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: results.sarif
-          category: gitleaks
+          sarif_file: gitleaks-ci.sarif
+          category: gitleaks-ci
 
       # ---------------------------
       # Build container image
@@ -79,7 +92,7 @@ jobs:
 
       # ---------------------------
       # Container vuln scan (Grype) -> SARIF -> GitHub Security Dashboard
-      # NOTE: anchore/scan-action writes results.sarif by default
+      # Note: scan-action writes results.sarif by default; rename to avoid collisions
       # ---------------------------
       - name: Scan image with Grype (SARIF)
         uses: anchore/scan-action@v3
@@ -89,30 +102,36 @@ jobs:
           output-format: sarif
           severity-cutoff: high
 
+      - name: Rename Grype SARIF (avoid results.sarif collisions)
+        if: always()
+        run: |
+          if [ -f results.sarif ]; then mv results.sarif grype.sarif; fi
+
       - name: Upload Grype SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: results.sarif
+          sarif_file: grype.sarif
           category: grype
-  
+
   gitleaks_full:
-    name: gitleaks-full-repo-scan
+    name: gitleaks-full-history-audit
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-  
+
     steps:
       - name: Checkout (full history)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-  
+
       - name: Install Gitleaks
         run: |
           curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
           | tar -xz
           sudo mv gitleaks /usr/local/bin/gitleaks
-  
+          gitleaks version
+
       - name: Gitleaks Full History Scan (SARIF)
         run: |
           gitleaks detect \
@@ -121,7 +140,7 @@ jobs:
             --report-format sarif \
             --report-path gitleaks-full.sarif \
             --exit-code 0
-  
+
       - name: Upload Gitleaks Full Scan SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         if: always()
