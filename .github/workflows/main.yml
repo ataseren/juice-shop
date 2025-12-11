@@ -1,0 +1,117 @@
+name: DevSecOps
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  security:
+    name: DevSecOps Pipeline (SAST + Secrets + Container)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ---------------------------
+      # SAST (Semgrep) -> SARIF -> GitHub Security Dashboard
+      # ---------------------------
+      - name: Semgrep SAST (SARIF)
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/ci
+          generateSarif: "1"
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }} # opsiyonel; yoksa da çalışır
+
+      - name: Upload Semgrep SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+      # ---------------------------
+      # Secret scanning (Gitleaks) -> SARIF -> GitHub Security Dashboard
+      # ---------------------------
+      - name: Gitleaks Secret Scan (SARIF)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: >
+            detect
+            --source .
+            --no-git
+            --report-format sarif
+            --report-path gitleaks.sarif
+
+      - name: Upload Gitleaks SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks.sarif
+          category: gitleaks
+
+      # ---------------------------
+      # Build container image (Juice Shop)
+      # ---------------------------
+      - name: Build Docker image
+        run: |
+          docker build -t juice-shop:${{ github.sha }} .
+
+      # ---------------------------
+      # SBOM (Syft) + Vulnerability scan (Grype) -> SARIF -> GitHub Security Dashboard
+      # ---------------------------
+      - name: Generate SBOM (Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: juice-shop:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+
+      - name: Scan image with Grype (SARIF)
+        uses: anchore/scan-action@v3
+        with:
+          image: juice-shop:${{ github.sha }}
+          fail-build: "false"
+          output-format: sarif
+          output-file: grype.sarif
+          severity-cutoff: high
+
+      - name: Upload Grype SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: grype.sarif
+          category: grype
+
+      # ---------------------------
+      # (Opsiyonel) OWASP Dependency-Check (artifact)
+      # ---------------------------
+      - name: OWASP Dependency-Check (HTML report)
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: "juice-shop"
+          path: "."
+          format: "HTML"
+          args: >
+            --disableArchive
+
+      - name: Upload Dependency-Check report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: ${{ github.workspace }}/reports
